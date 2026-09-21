@@ -1,0 +1,11 @@
+aethium.exe
+aethium
+aethium-mac
+aethium-linux
+installer/payload/
+dist/
+*.vsix
+*.test
+*.out
+.DS_Store
+Thumbs.db

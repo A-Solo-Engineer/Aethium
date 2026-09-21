@@ -1,0 +1,274 @@
+import math
+import json
+
+class Shape:
+    def __init__(self, color="white"):
+        self.color = color
+
+    def area(self):
+        raise NotImplementedError("area() must be implemented by subclass")
+
+    def perimeter(self):
+        raise NotImplementedError("perimeter() must be implemented by subclass")
+
+    def describe(self):
+        return f"{self.__class__.__name__}(color={self.color}, area={round(self.area(), 4)}, perimeter={round(self.perimeter(), 4)})"
+
+    def __repr__(self):
+        return self.describe()
+
+
+class Circle(Shape):
+    def __init__(self, radius, color="white"):
+        super().__init__(color)
+        self.radius = radius
+
+    def area(self):
+        return math.pi * self.radius ** 2
+
+    def perimeter(self):
+        return 2 * math.pi * self.radius
+
+    @property
+    def diameter(self):
+        return self.radius * 2
+
+
+class Rectangle(Shape):
+    def __init__(self, width, height, color="white"):
+        super().__init__(color)
+        self.width  = width
+        self.height = height
+
+    def area(self):
+        return self.width * self.height
+
+    def perimeter(self):
+        return 2 * (self.width + self.height)
+
+    @property
+    def is_square(self):
+        return self.width == self.height
+
+
+class Triangle(Shape):
+    def __init__(self, a, b, c, color="white"):
+        if a + b <= c or a + c <= b or b + c <= a:
+            raise ValueError(f"Invalid triangle sides: {a}, {b}, {c}")
+        super().__init__(color)
+        self.a = a
+        self.b = b
+        self.c = c
+
+    def area(self):
+        s = self.perimeter() / 2
+        return math.sqrt(s * (s - self.a) * (s - self.b) * (s - self.c))
+
+    def perimeter(self):
+        return self.a + self.b + self.c
+
+    @property
+    def kind(self):
+        match (self.a == self.b, self.b == self.c, self.a == self.c):
+            case (True, True, _):  return "equilateral"
+            case (True, _, _):     return "isosceles"
+            case (_, True, _):     return "isosceles"
+            case (_, _, True):     return "isosceles"
+            case _:                return "scalene"
+
+
+class ShapeCollection:
+    def __init__(self, name):
+        self.name   = name
+        self.shapes = []
+
+    def add(self, *shapes):
+        for s in shapes:
+            self.shapes.append(s)
+        return self
+
+    def total_area(self):
+        return sum(s.area() for s in self.shapes)
+
+    def total_perimeter(self):
+        return sum(s.perimeter() for s in self.shapes)
+
+    def largest(self):
+        return max(self.shapes, key=lambda s: s.area())
+
+    def by_type(self, kind):
+        return [s for s in self.shapes if isinstance(s, kind)]
+
+    def summary(self):
+        return {
+            "collection":       self.name,
+            "count":            len(self.shapes),
+            "total_area":       round(self.total_area(), 4),
+            "total_perimeter":  round(self.total_perimeter(), 4),
+            "largest":          self.largest().describe(),
+        }
+
+    def __len__(self):
+        return len(self.shapes)
+
+    def __repr__(self):
+        return f"ShapeCollection({self.name!r}, {len(self)} shapes)"
+
+
+class Animal:
+    _registry = {}
+
+    def __init__(self, name, sound):
+        self.name  = name
+        self.sound = sound
+
+    @classmethod
+    def register(cls, species, animal):
+        cls._registry[species] = animal
+
+    @classmethod
+    def from_registry(cls, species):
+        animal = cls._registry.get(species)
+        if animal is None:
+            raise KeyError(f"Unknown species: {species!r}")
+        return animal
+
+    @staticmethod
+    def kingdom():
+        return "Animalia"
+
+    def speak(self):
+        return f"{self.name} says {self.sound}!"
+
+    def __repr__(self):
+        return f"Animal(name={self.name!r}, sound={self.sound!r})"
+
+
+class Dog(Animal):
+    def __init__(self, name, breed):
+        super().__init__(name, "Woof")
+        self.breed = breed
+
+    def fetch(self, item="ball"):
+        return f"{self.name} fetches the {item}!"
+
+    def __repr__(self):
+        return f"Dog(name={self.name!r}, breed={self.breed!r})"
+
+
+class Cat(Animal):
+    def __init__(self, name, indoor=True):
+        super().__init__(name, "Meow")
+        self.indoor = indoor
+
+    def purr(self):
+        return f"{self.name} purrs..."
+
+    def __repr__(self):
+        return f"Cat(name={self.name!r}, indoor={self.indoor})"
+
+
+class Serializable:
+    def to_dict(self):
+        raise NotImplementedError
+
+    def to_json(self):
+        return json.dumps(self.to_dict(), indent=2)
+
+    @classmethod
+    def from_dict(cls, data):
+        raise NotImplementedError
+
+
+class Person(Serializable):
+    def __init__(self, name, age, *hobbies, email=None):
+        self.name    = name
+        self.age     = age
+        self.hobbies = list(hobbies)
+        self.email   = email
+
+    @property
+    def is_adult(self):
+        return self.age >= 18
+
+    @property
+    def hobby_count(self):
+        return len(self.hobbies)
+
+    def add_hobby(self, *hobbies):
+        for h in hobbies:
+            self.hobbies.append(h)
+        return self
+
+    def to_dict(self):
+        return {
+            "name":    self.name,
+            "age":     self.age,
+            "adult":   self.is_adult,
+            "hobbies": self.hobbies,
+            "email":   self.email,
+        }
+
+    def __repr__(self):
+        return f"Person(name={self.name!r}, age={self.age})"
+
+
+print("=== Shapes ===")
+
+c  = Circle(5, color="red")
+r  = Rectangle(4, 6, color="blue")
+r2 = Rectangle(5, 5, color="green")
+t  = Triangle(3, 4, 5, color="yellow")
+t2 = Triangle(6, 6, 6, color="purple")
+
+print(c.describe())
+print(f"  diameter = {c.diameter}")
+print(r.describe())
+print(f"  is_square = {r.is_square}")
+print(r2.describe())
+print(f"  is_square = {r2.is_square}")
+print(t.describe())
+print(f"  kind = {t.kind}")
+print(t2.describe())
+print(f"  kind = {t2.kind}")
+
+col = ShapeCollection("My Shapes").add(c, r, r2, t, t2)
+print(f"\n{col}")
+print(json.dumps(col.summary(), indent=2))
+
+circles = col.by_type(Circle)
+print(f"\nCircles: {circles}")
+print(f"Largest: {col.largest()}")
+
+
+print("\n=== Animals ===")
+
+dog = Dog("Rex", "German Shepherd")
+cat = Cat("Whiskers", indoor=True)
+
+Animal.register("dog", dog)
+Animal.register("cat", cat)
+
+print(dog.speak())
+print(dog.fetch("stick"))
+print(cat.speak())
+print(cat.purr())
+print(f"Kingdom: {Animal.kingdom()}")
+
+retrieved = Animal.from_registry("dog")
+print(f"From registry: {retrieved}")
+
+try:
+    Animal.from_registry("dragon")
+except KeyError as e:
+    print(f"Caught: {e}")
+
+
+print("\n=== Person ===")
+
+p = Person("Ada", 29, "coding", "chess", email="ada@example.com")
+p.add_hobby("reading", "hiking")
+
+print(p)
+print(f"  adult={p.is_adult}, hobbies={p.hobby_count}")
+print(p.to_json())

@@ -1,0 +1,174 @@
+import time
+import math
+
+def worker(id, jobs_ch, results_ch):
+    while True:
+        job = jobs_ch.recv()
+        if job is None:
+            break
+        n, kind = job
+        match kind:
+            case "prime":
+                result = is_prime(n)
+            case "fib":
+                result = fib(n)
+            case "square":
+                result = n * n
+            case _:
+                result = None
+        results_ch.send((id, n, kind, result))
+
+def is_prime(n):
+    if n < 2:
+        return False
+    i = 2
+    while i * i <= n:
+        if n % i == 0:
+            return False
+        i = i + 1
+    return True
+
+def fib(n):
+    a, b = 0, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+NUM_WORKERS = 6
+jobs_ch    = chan(64)
+results_ch = chan(64)
+
+for i in range(NUM_WORKERS):
+    go worker(i + 1, jobs_ch, results_ch)
+
+jobs = [
+    (97,  "prime"), (100, "prime"), (7919, "prime"), (7920, "prime"),
+    (30,  "fib"),   (35,  "fib"),   (40,   "fib"),
+    (12,  "square"),(25,  "square"),(99,   "square"),
+]
+
+for job in jobs:
+    jobs_ch.send(job)
+
+for _ in range(NUM_WORKERS):
+    jobs_ch.send(None)
+
+print("Worker  Input   Task     Result")
+print("-" * 40)
+
+for _ in range(len(jobs)):
+    wid, n, kind, result = results_ch.recv()
+    print(f"  {wid}     {n:<7} {kind:<8} {result}")
+
+jobs_ch.close()
+results_ch.close()
+
+
+def producer(out_ch, items):
+    for item in items:
+        out_ch.send(item)
+    out_ch.send(None)
+
+def stage_double(in_ch, out_ch):
+    while True:
+        v = in_ch.recv()
+        if v is None:
+            out_ch.send(None)
+            break
+        out_ch.send(v * 2)
+
+def stage_filter_even(in_ch, out_ch):
+    while True:
+        v = in_ch.recv()
+        if v is None:
+            out_ch.send(None)
+            break
+        if v % 4 == 0:
+            out_ch.send(v)
+
+def stage_sqrt(in_ch, out_ch):
+    while True:
+        v = in_ch.recv()
+        if v is None:
+            out_ch.send(None)
+            break
+        out_ch.send(round(math.sqrt(v), 4))
+
+ch1 = chan(32)
+ch2 = chan(32)
+ch3 = chan(32)
+ch4 = chan(32)
+
+go producer(ch1, list(range(1, 21)))
+go stage_double(ch1, ch2)
+go stage_filter_even(ch2, ch3)
+go stage_sqrt(ch3, ch4)
+
+print("\nPipeline: range(1,21) -> double -> filter_even -> sqrt")
+print("-" * 40)
+
+results = []
+while True:
+    v = ch4.recv()
+    if v is None:
+        break
+    results.append(v)
+
+print(f"Results: {results}")
+
+ch1.close()
+ch2.close()
+ch3.close()
+ch4.close()
+
+
+def fan_out(in_ch, out_a, out_b, out_c):
+    while True:
+        v = in_ch.recv()
+        if v is None:
+            out_a.send(None)
+            out_b.send(None)
+            out_c.send(None)
+            break
+        out_a.send(v)
+        out_b.send(v)
+        out_c.send(v)
+
+def accumulator(in_ch, results_ch, label):
+    total = 0
+    count = 0
+    while True:
+        v = in_ch.recv()
+        if v is None:
+            break
+        total = total + v
+        count = count + 1
+    results_ch.send((label, total, count))
+
+src     = chan(32)
+branchA = chan(32)
+branchB = chan(32)
+branchC = chan(32)
+out     = chan(8)
+
+go fan_out(src, branchA, branchB, branchC)
+go accumulator(branchA, out, "A")
+go accumulator(branchB, out, "B")
+go accumulator(branchC, out, "C")
+
+for n in range(1, 11):
+    src.send(n)
+src.send(None)
+
+print("\nFan-out: 1..10 broadcast to 3 accumulators")
+print("-" * 40)
+
+for _ in range(3):
+    label, total, count = out.recv()
+    print(f"  Accumulator {label}: sum={total}, count={count}")
+
+src.close()
+branchA.close()
+branchB.close()
+branchC.close()
+out.close()

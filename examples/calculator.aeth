@@ -1,0 +1,61 @@
+# Just a basic calculator
+def add(a, b):
+    return a + b
+
+
+def subtract(a, b):
+    return a - b
+
+
+def multiply(a, b):
+    return a * b
+
+
+def divide(a, b):
+    if b == 0:
+        return "Error: cannot divide by zero"
+    return a / b
+
+
+print("Aethium Terminal Calculator")
+print("Enter 'q' at any prompt to quit.\n")
+
+while True:
+    operation = input("Choose an operation (+, -, *, /): ")
+
+    if operation == "q":
+        print("Goodbye!")
+        break
+
+    if operation not in ["+", "-", "*", "/"]:
+        print("Invalid operator. Please choose one of: +, -, *, /")
+        continue
+
+    first_input = input("Enter the first number: ")
+    if first_input == "q":
+        print("Goodbye!")
+        break
+
+    second_input = input("Enter the second number: ")
+    if second_input == "q":
+        print("Goodbye!")
+        break
+
+    try:
+        num1 = float(first_input)
+        num2 = float(second_input)
+    except Exception:
+        print("Please enter valid numbers.")
+        continue
+
+    if operation == "+":
+        result = add(num1, num2)
+    elif operation == "-":
+        result = subtract(num1, num2)
+    elif operation == "*":
+        result = multiply(num1, num2)
+    else:
+        result = divide(num1, num2)
+
+    print("Result:", result)
+    print()

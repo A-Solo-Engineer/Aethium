@@ -1,0 +1,216 @@
+import time
+import math
+import random
+import json
+
+class PipelineError(Exception):
+    def __init__(self, message, job_id=None):
+        self.message = message
+        self.job_id  = job_id
+
+    def __str__(self):
+        if self.job_id:
+            return f"PipelineError[job={self.job_id}]: {self.message}"
+        return f"PipelineError: {self.message}"
+
+
+class Priority:
+    LOW    = 1
+    NORMAL = 2
+    HIGH   = 3
+    URGENT = 4
+
+    @staticmethod
+    def label(level):
+        match level:
+            case 1: return "LOW"
+            case 2: return "NORMAL"
+            case 3: return "HIGH"
+            case 4: return "URGENT"
+            case _: return "UNKNOWN"
+
+
+class Job:
+    _counter = 0
+
+    def __init__(self, name, handler, *args, priority=Priority.NORMAL, **meta):
+        Job._counter    = Job._counter + 1
+        self.id         = Job._counter
+        self.name       = name
+        self.handler    = handler
+        self.args       = args
+        self.priority   = priority
+        self.meta       = meta
+        self.status     = "pending"
+        self.result     = None
+        self.error      = None
+        self.elapsed_ms = 0
+
+    @classmethod
+    def create(cls, name, handler, *args, **kwargs):
+        return cls(name, handler, *args, **kwargs)
+
+    @property
+    def priority_label(self):
+        return Priority.label(self.priority)
+
+    @property
+    def succeeded(self):
+        return self.status == "done"
+
+    def __repr__(self):
+        return f"Job(id={self.id}, name={self.name!r}, status={self.status})"
+
+
+def retry(max_attempts=3):
+    def decorator(fn):
+        def wrapper(*args, **kwargs):
+            last_err = None
+            for _ in range(max_attempts):
+                try:
+                    return fn(*args, **kwargs)
+                except Exception as e:
+                    last_err = e
+            raise PipelineError(f"failed after {max_attempts} attempts: {last_err}")
+        return wrapper
+    return decorator
+
+
+def worker(in_ch, out_ch):
+    while True:
+        job = in_ch.recv()
+        if job is None:
+            break
+        t0 = time.time()
+        job.status = "running"
+        try:
+            job.result = job.handler(*job.args)
+            job.status = "done"
+        except PipelineError as e:
+            job.status = "failed"
+            job.error  = e
+        except Exception as e:
+            job.status = "failed"
+            job.error  = PipelineError(str(e), job_id=job.id)
+        job.elapsed_ms = round((time.time() - t0) * 1000, 2)
+        out_ch.send(job)
+
+
+class Pipeline:
+    def __init__(self, workers=4, buffer=64):
+        self.num_workers = workers
+        self.in_ch       = chan(buffer)
+        self.out_ch      = chan(buffer)
+        self._jobs       = []
+
+    def submit(self, *jobs):
+        for j in jobs:
+            self._jobs.append(j)
+        return self
+
+    def run(self):
+        for _ in range(self.num_workers):
+            go worker(self.in_ch, self.out_ch)
+
+        ordered = sorted(self._jobs, key=lambda j: j.priority, reverse=True)
+        for job in ordered:
+            self.in_ch.send(job)
+
+        for _ in range(self.num_workers):
+            self.in_ch.send(None)
+
+        results = []
+        for _ in range(len(self._jobs)):
+            results.append(self.out_ch.recv())
+
+        self.in_ch.close()
+        self.out_ch.close()
+        return results
+
+
+def sieve(limit):
+    s = [True] * (limit + 1)
+    s[0] = s[1] = False
+    i = 2
+    while i * i <= limit:
+        if s[i]:
+            j = i * i
+            while j <= limit:
+                s[j] = False
+                j = j + i
+        i = i + 1
+    return [n for n in range(2, limit + 1) if s[n]]
+
+
+def stats(numbers):
+    n    = len(numbers)
+    mean = sum(numbers) / n
+    var  = sum((x - mean) ** 2 for x in numbers) / n
+    return {"n": n, "mean": round(mean, 4), "stddev": round(math.sqrt(var), 4),
+            "min": min(numbers), "max": max(numbers)}
+
+
+def monte_carlo_pi(samples):
+    inside = 0
+    for _ in range(samples):
+        x = random.random()
+        y = random.random()
+        if x * x + y * y <= 1.0:
+            inside = inside + 1
+    return round(4.0 * inside / samples, 6)
+
+
+def word_freq(text):
+    freq = {}
+    for w in text.lower().split():
+        freq[w] = freq.get(w, 0) + 1
+    pairs = sorted(freq.items(), key=lambda kv: kv[1], reverse=True)
+    return {k: v for k, v in pairs[:5]}
+
+
+@retry(max_attempts=3)
+def parse_payload(raw):
+    data = json.loads(raw)
+    if "value" not in data:
+        raise ValueError("missing 'value' key")
+    return data["value"]
+
+
+numbers = [random.gauss(50, 15) for _ in range(5000)]
+corpus  = "Aethium is fast and concurrent. Aethium supports goroutines and channels natively."
+
+p = Pipeline(workers=4)
+p.submit(
+    Job.create("primes-10k",    sieve,          10_000,  priority=Priority.URGENT),
+    Job.create("primes-50k",    sieve,          50_000,  priority=Priority.HIGH),
+    Job.create("monte-1k",      monte_carlo_pi, 1_000,   priority=Priority.LOW),
+    Job.create("monte-10k",     monte_carlo_pi, 10_000,  priority=Priority.NORMAL),
+    Job.create("monte-50k",     monte_carlo_pi, 50_000,  priority=Priority.HIGH),
+    Job.create("stats",         stats,          numbers, priority=Priority.NORMAL),
+    Job.create("word-freq",     word_freq,      corpus,  priority=Priority.LOW),
+    Job.create("json-ok",       parse_payload,  '{"value": 99}', priority=Priority.NORMAL),
+    Job.create("json-bad",      parse_payload,  '{"wrong": 1}',  priority=Priority.LOW),
+)
+
+t0      = time.time()
+results = p.run()
+elapsed = round((time.time() - t0) * 1000, 1)
+
+done   = len([j for j in results if j.succeeded])
+failed = len([j for j in results if not j.succeeded])
+
+print(f"Pipeline complete in {elapsed}ms — {done} succeeded, {failed} failed\n")
+print(f"{'#':<4} {'Name':<16} {'Priority':<8} {'Status':<8} {'Time(ms)':<10} Result")
+print("-" * 75)
+
+for j in sorted(results, key=lambda x: x.id):
+    status_icon = "OK" if j.succeeded else "FAIL"
+    result_str  = ""
+    if j.succeeded:
+        s = str(j.result)
+        result_str = s[:55] + "..." if len(s) > 55 else s
+    else:
+        result_str = str(j.error)
+    print(f"{j.id:<4} {j.name:<16} {j.priority_label:<8} {status_icon:<8} {j.elapsed_ms:<10} {result_str}")
+
+print(f"\nWorker utilization: {len(results)} jobs across {p.num_workers} workers")
