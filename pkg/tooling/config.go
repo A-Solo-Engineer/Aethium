@@ -62,5 +62,9 @@ func ParseToml(path string) (*ProjectConfig, error) {
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
